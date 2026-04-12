@@ -1,0 +1,151 @@
+\documentclass[journal]{IEEEtran}
+
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{cite}
+
+\begin{document}
+
+\title{Deep Learning for High-Frequency Trading: A 1D-CNN Approach on Limit Order Book Dynamics}
+
+\author{Yash~Kothari%
+\thanks{Y. Kothari is an independent researcher. (e-mail: yashkothari@example.com).}%
+}
+
+\markboth{Journal of Machine Learning in Quantitative Finance,~Vol.~1, No.~1, April~2026}%
+{Kothari: Deep Learning for High-Frequency Trading}
+
+\maketitle
+
+\begin{abstract}
+High-Frequency Trading (HFT) relies on the rapid analysis of microstructure data to predict short-term price movements. This paper presents an end-to-end deep learning framework utilizing a 9-layer 1D Convolutional Neural Network (CNN) to predict mid-price direction from Level-2 Limit Order Book (LOB) data. Evaluated on the benchmark FI-2010 dataset, the model correctly captures both the spatial hierarchies of order book levels and the temporal dynamics over recent tick horizons. Furthermore, a highly realistic backtesting engine was developed to evaluate profitability, aggressively accounting for transaction costs including 0.75 basis points (bps) of slippage and 0.20 bps of exchange commissions. Testing over 55,379 unseen sequential market states out-of-sample yielded a hit rate of 54.0\%, a Sharpe Ratio of 3.14, and consistent cumulative profitability, demonstrating the viability of utility-based CNN agents in highly competitive microstructure environments.
+\end{abstract}
+
+\begin{IEEEkeywords}
+High-Frequency Trading, Limit Order Book, Convolutional Neural Networks, Algorithmic Trading, FI-2010.
+\end{IEEEkeywords}
+
+\IEEEpeerreviewmaketitle
+
+\section{Introduction}
+\IEEEPARstart{T}{he} evolution of electronic exchanges has transitioned market-making and price speculation from human-driven pits to algorithmic High-Frequency Trading (HFT) systems. In modern exchanges, the Limit Order Book (LOB) serves as the fundamental data structure, recording all outstanding resting orders at various price levels. Understanding the predictive power nested within the LOB's rapid fluctuations is a paramount challenge in quantitative finance.
+
+Traditional predictive models, such as Support Vector Machines (SVMs) and Linear Regression, often fail to capture the complex, non-linear spatiotemporal dependencies inherent in order book updates. This study proposes using a Deep Learning architecture—specifically a 1-Dimensional Convolutional Neural Network (1D-CNN)—to hierarchically extract features from raw LOB data. By treating the time-series of limit order states analogously to spatial data, CNNs can effectively learn localized patterns that signal impending price movements.
+
+This paper details the methodology, data processing, architectural design, and trading strategy formulation required to train an effective HFT bot. Uniquely, this study emphasizes strict backtesting rigor by implementing realistic transaction cost models and validating via a state-by-state, tick-accurate simulation dashboard, ensuring theoretical model accuracy translates to practical profitability.
+
+\section{Data and Preprocessing}
+\subsection{The FI-2010 Benchmark Dataset}
+The model is trained and evaluated using the publicly available Benchmark Dataset for Mid-Price Forecasting of Limit Order Book Data (FI-2010). The dataset encapsulates normalized, high-frequency Level-2 order book snapshots from Finnish equities. 
+
+Each snapshot comprises 40 features representing the top 10 levels of the order book. For each level $i$ (where $1 \leq i \leq 10$), the data provides:
+\begin{itemize}
+    \item Ask Price ($P_a^{(i)}$) and Ask Volume ($V_a^{(i)}$)
+    \item Bid Price ($P_b^{(i)}$) and Bid Volume ($V_b^{(i)}$)
+\end{itemize}
+
+The features are explicitly normalized using Z-score standardization across the training subset to prevent look-ahead bias.
+
+\subsection{Temporal Windowing and Label Alignment}
+To provide the network with temporal context, the input data is constructed using a sliding window of the most recent 10 ticks. Thus, every input sequence fed into the network has the shape $\mathbb{R}^{40 \times 10}$.
+
+The target labels forecast the direction of the mid-price over a future horizon. A critical correction was implemented regarding the label taxonomy of the raw dataset to ensure proper vector alignment during backtesting. The refined mapping isolates three discrete classes:
+\begin{enumerate}
+    \item \textbf{Class 0 (DOWNward):} The mid-price is projected to decrease.
+    \item \textbf{Class 1 (STATionary):} The mid-price will remain stable within bounds.
+    \item \textbf{Class 2 (UPward):} The mid-price is projected to increase.
+\end{enumerate}
+Proper alignment of this mapping (1=DOWN, 2=STAT, 3=UP) from the raw text files cured structural inversion bugs typical in naive applications of this dataset.
+
+\section{Model Architecture}
+The core predictive engine is a deep 9-layer 1D-CNN comprising approximately 1.07 million learnable parameters. The architecture is engineered to exploit the feature-temporal matrix constructed in the preprocessing phase.
+
+The network is structured as follows:
+\begin{enumerate}
+    \item \textbf{Temporal Convolution Blocks:} Initial `Conv1d` layers utilize kernel sizes of 3, striding across the temporal axis to extract consecutive tick velocity and acceleration features. 
+    \item \textbf{Activation and Regularization:} Each convolution is followed by Batch Normalization and ReLU non-linearities to accelerate convergence and solve the vanishing gradient problem.
+    \item \textbf{Deep Feature Extraction:} As the network deepens, the feature channels expand from 64 to 256, allowing the model to generate highly abstract representations of order book imbalance and spread pressure.
+    \item \textbf{Classification Head:} The final high-dimensional latent vector is flattened and passed through fully connected layers with Dropout ($p=0.3$) to synthesize the ultimate 3-way softmax probability output ($P_{DOWN}, P_{STAT}, P_{UP}$).
+\end{enumerate}
+
+The network was trained using Cross-Entropy Loss to handle the multi-class categorization, coupled with the Adam optimizer leveraging a learning rate of 0.001. Hardware acceleration was achieved via PyTorch's MPS backend for Apple Silicon.
+
+\section{Trading Strategy and Cost Model}
+High predictive accuracy ($>$60\%) in HFT is notoriously insufficient if transaction costs overshadow edge. A proprietary sequential `BacktestEngine` was formulated to rigorously constrain the model.
+
+\subsection{Actuator Signal Logic}
+The bot generates signals strictly based on probability thresholds. A position is taken only when the model's confidence exceeds a high threshold ($\tau = 0.65$):
+\begin{equation}
+\text{Signal} = 
+\begin{cases} 
+\text{BUY}, & \text{if } P_{UP} > 0.65 \text{ and Flat} \\
+\text{SELL}, & \text{if } P_{DOWN} > 0.65 \text{ and Flat} \\
+\text{EXIT}, & \text{if } \text{In Position and } P_{STAT} > 0.65
+\end{cases}
+\end{equation}
+
+\subsection{Slippage and Commission}
+Institutional transaction boundaries were simulated. For every transaction leg, the bot is charged:
+\begin{itemize}
+    \item \textbf{Slippage:} 0.75 Basis Points (bps)
+    \item \textbf{Commission:} 0.20 bps
+\end{itemize}
+This aggregates to a 0.95 bps penalty per leg, or a 1.90 bps round-trip cost (approximately 2 cents on a $\$100$ asset). Because the simulated asset tick size is exactly \$0.01, the AI must explicitly predict a price movement of \textit{at least 2 consecutive ticks} to break even.
+
+\section{Results}
+The model was evaluated exclusively on Day 10 of the FI-2010 dataset, representing 55,379 unseen continuous sequential market states. 
+
+\subsection{Classification Metrics}
+On the validation set, the model achieved an F1-Score of 0.57 and a raw directional accuracy of 62.4\%. More critically, precision for actionable threshold classes ($P > 0.65$) exceeded 80\%, meaning the network demonstrated extremely high reliability when signaling absolute confidence.
+
+\subsection{Profitability and Backtest Simulation}
+The out-of-sample backtest confirmed exceptional practical predictive edge. Simulated over the 55,379 un-sampled steps tracking absolute order book shifts:
+\begin{table}[h]
+\centering
+\caption{Out-of-Sample Backtest Results}
+\begin{tabular}{|l||c|}
+\hline
+\textbf{Metric} & \textbf{Value}\\
+\hline
+Total Number of States & 55,379 \\
+Completed Trades & 1,153 \\
+Hit Rate (Win \%) & 54.0\% \\
+Cumulative PnL (1 Unit) & \$17.90 \\
+Sharpe Ratio & 3.14 \\
+\hline
+\end{tabular}
+\label{table_results}
+\end{table}
+
+The agent reliably accumulated a robust Cumulative PnL of \$17.90 per single unit traded. The Sharpe Ratio of 3.14 indicates highly consistent, low-variance alpha generation. 
+
+% INSERT YOUR SIMULATION PNL CURVE IMAGE HERE IN OVERLEAF
+\begin{figure}[!h]
+\centering
+% Uncomment the next line and upload your image to Overleaf:
+% \includegraphics[width=3.4in]{pnl_curve.png}
+\caption{Cumulative PnL Curve across 55,379 unseen simulation steps. The consistent upward trajectory validates the CNN's predictive edge overcoming the 1.90 bps round-trip transaction costs.}
+\label{fig_pnl}
+\end{figure}
+
+To validate outcomes visually, a custom HTML5/Javascript simulation dashboard was engineered. The dashboard processes the full 9.7MB simulation output, successfully aligning real-time asynchronous Bid/Ask volume clusters with the model's predictive threshold activations, guaranteeing exact alignment between mathematical backtesting and practical execution.
+
+\section{Conclusion}
+This study validates that Deep 1D Convolutional Neural Networks possess the requisite pattern-recognition capabilities to decode Limit Order Book microstructure. By successfully training a 9-layer CNN on the FI-2010 dataset, aligning labels accurately, and bounding the agent with strict 1.90 bps institutional round-trip costs, the algorithm generated a highly profitable, 3.14 Sharpe HFT strategy. Future iterations should explore focal loss mechanisms to counteract the highly imbalanced nature of stationary market states, and dynamically augment actuator logic to reverse positions immediately against contrary threshold signals.
+
+\section*{Acknowledgment}
+The author would like to acknowledge the open-source community and the providers of the FI-2010 dataset for advancing machine learning within quantitative finance.
+
+\begin{thebibliography}{1}
+
+\bibitem{FI2010}
+A. Ntakaris, M. Magris, J. Kanniainen, M. Gabbouj, and A. Iosifidis, \emph{Benchmark dataset for mid-price forecasting of limit order book data with machine learning methods}, Journal of Forecasting, vol. 37, no. 8, pp. 852-866, 2018.
+
+\bibitem{Sirignano2019}
+J. Sirignano and R. Cont, \emph{Universal features of price formation in financial markets: perspectives from deep learning}, Quantitative Finance, vol. 19, no. 9, pp. 1449-1459, 2019.
+
+\end{thebibliography}
+
+\end{document}

@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live Agent Simulation — Order Book Mid-Price Predictor</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:#0f0f14;color:#d0d0d8;min-height:100vh}
+.dash{max-width:1080px;margin:0 auto;padding:18px 22px 30px}
+header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:14px;border-bottom:1px solid #1e1e2a;margin-bottom:16px}
+.title h1{font-size:19px;font-weight:600;color:#eee;letter-spacing:-.3px}
+.title p{font-size:11.5px;color:#555;margin-top:3px}
+.controls{display:flex;align-items:center;gap:9px;flex-shrink:0}
+.controls label{font-size:12px;color:#777}
+.controls select{background:#16161e;border:1px solid #2c2c38;color:#ccc;padding:5px 8px;border-radius:5px;font-family:'Inter',sans-serif;font-size:12px;cursor:pointer}
+.controls button{background:#16161e;border:1px solid #2c2c38;color:#ccc;padding:6px 16px;border-radius:5px;font-family:'Inter',sans-serif;font-size:12px;cursor:pointer;transition:all .15s}
+.controls button:hover{background:#22222e;border-color:#444}
+.controls button.running{background:#1b7a3d;border-color:#1b7a3d;color:#fff}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
+.st{background:#13131a;border:1px solid #1e1e2a;border-radius:7px;padding:12px 14px}
+.st-label{display:block;font-size:9.5px;font-weight:600;letter-spacing:.9px;color:#555;text-transform:uppercase;margin-bottom:5px}
+.st-val{display:block;font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:600;color:#eee}
+.st-val.pos{color:#4caf50}.st-val.neg{color:#ef5350}
+.card{background:#13131a;border:1px solid #1e1e2a;border-radius:7px;padding:14px 15px}
+.card h2{font-size:10.5px;font-weight:600;letter-spacing:.7px;color:#666;text-transform:uppercase;margin-bottom:12px}
+.grid3{display:grid;grid-template-columns:1fr 1.15fr 1fr;gap:12px;margin-bottom:14px}
+.ob{width:100%;border-collapse:collapse;font-family:'JetBrains Mono',monospace;font-size:12.5px}
+.ob th{font-size:10px;font-weight:500;color:#555;padding:4px 0;border-bottom:1px solid #1e1e2a;text-transform:uppercase}
+.ob td{padding:4px 0}
+.ob-vol{color:#777}.ob-pr{font-weight:500}
+.bid-pr{color:#4caf50}.ask-pr{color:#ef5350}
+.ob-mid td{padding:8px 0;font-weight:600;color:#eee;font-size:13.5px;text-align:center;border-bottom:1px solid #1e1e2a}
+.ob-left{text-align:left}.ob-right{text-align:right}.ob-center{text-align:center}
+.ob-divider{border-left:1px dashed #2a2a36}
+.pr-row{display:flex;align-items:center;margin-bottom:9px;gap:9px}
+.pr-lbl{width:44px;font-size:11.5px;font-weight:600;color:#777}
+.pr-bg{flex:1;height:16px;background:#1a1a24;border-radius:3px;overflow:hidden}
+.pr-fill{height:100%;border-radius:3px;transition:width .15s}
+.pr-fill.down{background:linear-gradient(90deg,#b33a2e,#e25241)}.pr-fill.stat{background:linear-gradient(90deg,#4a4a58,#6a6a78)}.pr-fill.up{background:linear-gradient(90deg,#1d8e48,#27ae60)}
+.pr-pct{width:36px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:11.5px;font-weight:500;color:#999}
+.act-box{margin-top:12px;background:#0f0f14;border:1px solid #1e1e2a;border-radius:7px;padding:10px;text-align:center}
+.act-title{font-size:9.5px;letter-spacing:.9px;color:#555;font-weight:600;margin-bottom:4px}
+.act-sig{font-family:'JetBrains Mono',monospace;font-size:26px;font-weight:700;margin:2px 0}
+.act-sig.buy{color:#4caf50}.act-sig.sell{color:#ef5350}.act-sig.hold{color:#6a6a78}.act-sig.exit{color:#ffa726}
+.act-conf{font-size:10.5px;color:#555;margin-top:3px}
+.pos-badge{display:inline-block;margin-top:8px;padding:3px 12px;border-radius:3px;font-size:11px;font-weight:600;font-family:'JetBrains Mono',monospace}
+.pos-badge.long{background:#1b5e2044;color:#4caf50}.pos-badge.short{background:#c6282844;color:#ef5350}.pos-badge.flat{background:#37474f55;color:#90a4ae}
+.tlog{max-height:270px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#2a2a36 #13131a}
+.te{display:flex;align-items:center;padding:5px 0;border-bottom:1px solid #18181f;gap:7px;font-size:11.5px}
+.te-badge{display:inline-block;padding:2px 7px;border-radius:3px;font-size:9.5px;font-weight:700;font-family:'JetBrains Mono',monospace;min-width:36px;text-align:center}
+.te-badge.buy{background:#1b5e2066;color:#4caf50}.te-badge.sell{background:#c6282855;color:#ef5350}.te-badge.exit{background:#37474f55;color:#90a4ae}
+.te-txt{flex:1;color:#999;font-family:'JetBrains Mono',monospace;font-size:10.5px}
+.te-pnl{font-family:'JetBrains Mono',monospace;font-size:10.5px;font-weight:600}
+.te-pnl.pos{color:#4caf50}.te-pnl.neg{color:#ef5350}
+.ch-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.ch-hdr h2{margin-bottom:0}
+.ch-step{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:#777}
+#pnlCanvas{width:100%;height:200px;display:block;border-radius:4px}
+.prog-wrap{margin-top:8px;display:flex;align-items:center;gap:10px}
+.prog-bar{flex:1;height:4px;background:#1a1a24;border-radius:2px;overflow:hidden;cursor:pointer}
+.prog-fill{height:100%;background:#26a69a;border-radius:2px;transition:width .1s}
+.prog-pct{font-family:'JetBrains Mono',monospace;font-size:10px;color:#555;min-width:40px;text-align:right}
+::-webkit-scrollbar{width:3px}::-webkit-scrollbar-track{background:#13131a}::-webkit-scrollbar-thumb{background:#2a2a36;border-radius:2px}
+</style>
+</head>
+<body>
+<div class="dash">
+  <header>
+    <div class="title">
+      <h1>Live Agent Simulation — Order Book Mid-Price Predictor</h1>
+      <p>Utility-Based CNN Agent · FI-2010 Benchmark · Perceive → Think → Act</p>
+    </div>
+    <div class="controls">
+      <label>Speed</label>
+      <select id="speed">
+        <option value="500">2x</option><option value="250">4x</option>
+        <option value="100" selected>10x</option><option value="40">25x</option>
+        <option value="16">64x</option><option value="4">256x</option>
+        <option value="1">Max</option>
+      </select>
+      <button id="startBtn" onclick="toggleRun()">Start</button>
+      <button onclick="resetSim()">Reset</button>
+    </div>
+  </header>
+  <div class="stats">
+    <div class="st"><span class="st-label">Cumulative PnL</span><span class="st-val" id="sPnl">$0.000</span></div>
+    <div class="st"><span class="st-label">Completed Trades</span><span class="st-val" id="sTrades">0</span></div>
+    <div class="st"><span class="st-label">Hit Rate</span><span class="st-val" id="sHr">0%</span></div>
+    <div class="st"><span class="st-label">Sharpe Ratio</span><span class="st-val" id="sSr">0.00</span></div>
+  </div>
+  <div class="grid3">
+    <div class="card"><h2>Sensors — Order Book (Top 5 Levels)</h2><div id="obDiv"></div></div>
+    <div class="card"><h2>Think — CNN Output Probabilities</h2><div id="probDiv"></div>
+      <div class="act-box"><div class="act-title">ACTUATOR SIGNAL</div><div class="act-sig hold" id="sigText">HOLD</div><div class="act-conf" id="confText">Confidence: 0%</div><div><span class="pos-badge flat" id="posBadge">FLAT</span></div></div>
+    </div>
+    <div class="card"><h2>Act — Trade Log</h2><div class="tlog" id="tlogDiv"></div></div>
+  </div>
+  <div class="card">
+    <div class="ch-hdr"><h2>Cumulative PnL Over Simulation</h2><span class="ch-step" id="stepText">Step 0 / 0</span></div>
+    <canvas id="pnlCanvas"></canvas>
+    <div class="prog-wrap">
+      <div class="prog-bar" id="progBar" onclick="seekTo(event)"><div class="prog-fill" id="progFill"></div></div>
+      <span class="prog-pct" id="progPct">0%</span>
+    </div>
+  </div>
+</div>
+<script src="simulation_data.js"></script>
+<script>
+const D=SIM.steps, T=SIM.total, TR=SIM.trades, OB=SIM.ob;
+const SIG_NAMES=['HOLD','BUY','SELL','EXIT'], POS_NAMES=['FLAT','LONG','SHORT'];
+let cur=0,timer=null,running=false,tradeIdx=0,chartPnl=[],lastOB=null;
+
+function $(id){return document.getElementById(id)}
+
+function renderOB(i,mid){
+  const ob=OB[i];
+  if(!ob) return;
+  lastOB=ob;
+  const [asks,bids]=ob;
+  let h='<table class="ob">';
+  h+='<tr class="ob-mid"><td colspan="4">Mid Price: $'+mid.toFixed(3)+'</td></tr>';
+  h+='<tr><th class="ob-left">Vol</th><th class="ob-right" style="padding-right:8px">Bid</th><th class="ob-left ob-divider" style="padding-left:8px">Ask</th><th class="ob-right">Vol</th></tr>';
+  for(let j=0;j<5;j++){
+    h+='<tr>';
+    h+='<td class="ob-vol ob-left">'+bids[j][1]+'</td>';
+    h+='<td class="ob-pr bid-pr ob-right" style="padding-right:8px">$'+bids[j][0].toFixed(3)+'</td>';
+    h+='<td class="ob-pr ask-pr ob-left ob-divider" style="padding-left:8px">$'+asks[j][0].toFixed(3)+'</td>';
+    h+='<td class="ob-vol ob-right">'+asks[j][1]+'</td>';
+    h+='</tr>';
+  }
+  h+='</table>';
+  $('obDiv').innerHTML=h;
+}
+
+function renderProbs(s){
+  const cols=['down','stat','up'],lbls=['DOWN','STAT','UP'];
+  let h='';
+  for(let i=0;i<3;i++) h+='<div class="pr-row"><span class="pr-lbl">'+lbls[i]+'</span><div class="pr-bg"><div class="pr-fill '+cols[i]+'" style="width:'+s[i+1]+'%"></div></div><span class="pr-pct">'+s[i+1]+'%</span></div>';
+  $('probDiv').innerHTML=h;
+  const sigName=SIG_NAMES[s[4]];
+  const el=$('sigText');el.textContent=sigName;el.className='act-sig '+sigName.toLowerCase();
+  const conf=Math.max(s[1],s[2],s[3]);
+  const met=conf>SIM.threshold*100;
+  $('confText').textContent='Confidence: '+conf.toFixed(1)+'% '+(met?'✓ threshold met':'');
+  const posName=POS_NAMES[s[5]];
+  const pb=$('posBadge');pb.textContent=posName;pb.className='pos-badge '+posName.toLowerCase();
+}
+
+function renderTrades(){
+  let h='';
+  const visible=TR.slice(0,tradeIdx).reverse().slice(0,20);
+  for(const t of visible){
+    const cls=t.a.toLowerCase();
+    let pnlH='';
+    if(t.pnl!==undefined){const pc=t.pnl>=0?'pos':'neg';pnlH='<span class="te-pnl '+pc+'">'+(t.pnl>=0?'+':'')+t.pnl.toFixed(3)+'</span>';}
+    const txt=t.a==='EXIT'?'Exit @ $'+t.pr.toFixed(3):'Entry @ $'+t.pr.toFixed(3);
+    h+='<div class="te"><span class="te-badge '+cls+'">'+t.a+'</span><span class="te-txt">'+txt+'</span>'+pnlH+'</div>';
+  }
+  $('tlogDiv').innerHTML=h;
+}
+
+function renderStats(s){
+  const pe=$('sPnl');pe.textContent='$'+s[0].toFixed(3);pe.className='st-val '+(s[0]>=0?'pos':'neg');
+  $('sTrades').textContent=s[6];
+  $('sHr').textContent=s[7]+'%';
+  $('sSr').textContent=s[8].toFixed(2);
+}
+
+function drawChart(){
+  const c=$('pnlCanvas'),ctx=c.getContext('2d');
+  const dpr=window.devicePixelRatio||1;
+  const w=c.clientWidth,h=c.clientHeight;
+  c.width=w*dpr;c.height=h*dpr;ctx.scale(dpr,dpr);ctx.clearRect(0,0,w,h);
+  if(chartPnl.length<2) return;
+  const mn=Math.min(0,...chartPnl),mx=Math.max(0.01,...chartPnl);
+  const pad={t:10,b:25,l:50,r:15},cw=w-pad.l-pad.r,ch=h-pad.t-pad.b;
+  const toX=i=>pad.l+(i/(chartPnl.length-1))*cw;
+  const toY=v=>pad.t+ch-(((v-mn)/(mx-mn))*ch);
+  ctx.strokeStyle='#1e1e2a';ctx.lineWidth=1;
+  ctx.font='10px JetBrains Mono';ctx.fillStyle='#555';
+  for(let i=0;i<=5;i++){const v=mn+(mx-mn)*(i/5);const y=toY(v);ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(w-pad.r,y);ctx.stroke();ctx.fillText('$'+v.toFixed(2),4,y+3);}
+  if(mn<0){ctx.strokeStyle='#444';ctx.setLineDash([4,4]);const zy=toY(0);ctx.beginPath();ctx.moveTo(pad.l,zy);ctx.lineTo(w-pad.r,zy);ctx.stroke();ctx.setLineDash([]);}
+  const grad=ctx.createLinearGradient(0,pad.t,0,h-pad.b);grad.addColorStop(0,'rgba(38,166,154,0.25)');grad.addColorStop(1,'rgba(38,166,154,0.02)');
+  ctx.beginPath();ctx.moveTo(toX(0),toY(0));
+  for(let i=0;i<chartPnl.length;i++) ctx.lineTo(toX(i),toY(chartPnl[i]));
+  ctx.lineTo(toX(chartPnl.length-1),toY(0));ctx.closePath();ctx.fillStyle=grad;ctx.fill();
+  ctx.beginPath();ctx.moveTo(toX(0),toY(chartPnl[0]));
+  for(let i=1;i<chartPnl.length;i++) ctx.lineTo(toX(i),toY(chartPnl[i]));
+  ctx.strokeStyle='#26a69a';ctx.lineWidth=2;ctx.stroke();
+  const lx=toX(chartPnl.length-1),ly=toY(chartPnl[chartPnl.length-1]);
+  ctx.beginPath();ctx.arc(lx,ly,3.5,0,Math.PI*2);ctx.fillStyle='#26a69a';ctx.fill();
+}
+
+const CHART_SAMPLE=200;
+function addChartPoint(pnl){
+  const interval=Math.max(1,Math.floor(T/CHART_SAMPLE));
+  if(cur%interval===0||cur===T-1) chartPnl.push(pnl);
+}
+
+function step(){
+  if(cur>=T){stop();return;}
+  const s=D[cur];
+
+  while(tradeIdx<TR.length&&TR[tradeIdx].i<=cur) tradeIdx++;
+  const ms=parseInt($('speed').value);
+  const updateDOM=(ms>=40)||(cur%10===0)||(cur===T-1)||(s[4]>0);
+  if(updateDOM){
+    renderOB(cur,s[9]);
+    renderProbs(s);
+    renderStats(s);
+    renderTrades();
+    $('stepText').textContent='Step '+(cur+1).toLocaleString()+' / '+T.toLocaleString();
+    $('progFill').style.width=((cur+1)/T*100)+'%';
+    $('progPct').textContent=Math.round((cur+1)/T*100)+'%';
+  }
+  addChartPoint(s[0]);
+  if(ms>=40||cur%50===0||cur===T-1) drawChart();
+  cur++;
+}
+
+function toggleRun(){if(running) stop(); else start();}
+function start(){
+  if(cur>=T) return;
+  running=true;$('startBtn').textContent='Pause';$('startBtn').classList.add('running');
+  const ms=parseInt($('speed').value);
+  if(ms<=1){
+
+    stop();running=true;$('startBtn').textContent='Pause';$('startBtn').classList.add('running');
+    function chunk(){
+      if(!running||cur>=T){if(cur>=T){cur=T;step();} stop();return;}
+      const end=Math.min(cur+500,T);
+      while(cur<end) step();
+      requestAnimationFrame(chunk);
+    }
+    chunk();
+  } else {
+    timer=setInterval(step,ms);
+  }
+}
+function stop(){running=false;clearInterval(timer);timer=null;$('startBtn').textContent='Start';$('startBtn').classList.remove('running');}
+function resetSim(){
+  stop();cur=0;tradeIdx=0;chartPnl=[];lastOB=null;
+  $('sPnl').textContent='$0.000';$('sPnl').className='st-val';
+  $('sTrades').textContent='0';$('sHr').textContent='0%';$('sSr').textContent='0.00';
+  $('obDiv').innerHTML='';$('probDiv').innerHTML='';$('tlogDiv').innerHTML='';
+  $('sigText').textContent='HOLD';$('sigText').className='act-sig hold';
+  $('confText').textContent='Confidence: 0%';
+  $('posBadge').textContent='FLAT';$('posBadge').className='pos-badge flat';
+  $('stepText').textContent='Step 0 / '+T.toLocaleString();
+  $('progFill').style.width='0%';$('progPct').textContent='0%';
+  const c=$('pnlCanvas'),ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);
+}
+function seekTo(e){
+  const rect=$('progBar').getBoundingClientRect();
+  const pct=(e.clientX-rect.left)/rect.width;
+  const target=Math.floor(pct*T);
+
+  const wasRunning=running; stop();
+  cur=0;tradeIdx=0;chartPnl=[];lastOB=null;
+  while(cur<target) {const s=D[cur];while(tradeIdx<TR.length&&TR[tradeIdx].i<=cur) tradeIdx++;addChartPoint(s[0]);cur++;}
+  if(cur>0){const s=D[cur-1];renderOB(cur-1,s[9]);renderProbs(s);renderStats(s);renderTrades();
+    $('stepText').textContent='Step '+cur.toLocaleString()+' / '+T.toLocaleString();
+    $('progFill').style.width=(cur/T*100)+'%';$('progPct').textContent=Math.round(cur/T*100)+'%';drawChart();}
+  if(wasRunning) start();
+}
+$('speed').addEventListener('change',()=>{if(running){stop();start();}});
+window.addEventListener('resize',drawChart);
+resetSim();
+</script>
+</body>
+</html>
